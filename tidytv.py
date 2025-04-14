@@ -5,6 +5,7 @@ from tkinter import filedialog
 from os.path import isfile, join, splitext, basename, abspath
 import requests
 import json
+import threading
 
 
 def get_preview_data(base_path):
@@ -93,6 +94,12 @@ class EpisodeRenamerApp(ctk.CTk):
         if folder:
             self.load_preview(folder)
 
+    import threading
+
+    def threaded_refresh_preview(self):
+        if hasattr(self, "last_folder") and self.last_folder:
+            threading.Thread(target=lambda: self.load_preview(self.last_folder), daemon=True).start()
+
     def __init__(self):
         super().__init__()
 
@@ -112,13 +119,13 @@ class EpisodeRenamerApp(ctk.CTk):
         menu_bar = tk.Menu(self)
         file_menu = tk.Menu(menu_bar)
         file_menu.add_command(label="🆕 New", command=self.clear_preview)
-        file_menu.add_command(label="📂 Choose Folder", command=self.select_folder)
+        file_menu.add_command(label="📂 Choose Folder", command=lambda: self.threaded_load_preview(filedialog.askdirectory()))
         file_menu.add_command(label="🚀 Start", command=self.run_rename)
         menu_bar.add_cascade(label="File", menu=file_menu)
 
         settings_menu = tk.Menu(menu_bar)
         options_menu = tk.Menu(settings_menu)
-        options_menu.add_checkbutton(label="Scrape Episode Titles", variable=self.scrape_titles, command=self.refresh_preview)
+        options_menu.add_checkbutton(label="Scrape Episode Titles", variable=self.scrape_titles, command=self.threaded_refresh_preview)
         settings_menu.add_cascade(label="Options", menu=options_menu)
         settings_menu.add_command(label="🌓 Toggle Theme", command=self.toggle_theme)
         settings_menu.add_command(label="📋 Toggle Logs", command=self.toggle_logs)
@@ -167,32 +174,24 @@ class EpisodeRenamerApp(ctk.CTk):
             return
         self.load_preview(self.last_folder)
 
+    def threaded_load_preview(self, folder_selected):
+        threading.Thread(target=lambda: self.load_preview(folder_selected), daemon=True).start()
+
     def load_preview(self, folder_selected):
-        if not folder_selected:
-            return
-            return
-
-        try:
-            self.last_folder = folder_selected
-            if self.scrape_titles.get():
-                parent_dir, self.preview_data = get_scraped_preview_data(folder_selected, self.title_cache)
-            else:
-                parent_dir, self.preview_data = get_preview_data(folder_selected)
-
-            self.debug_text.delete("0.0", "end")
-            self.debug_text.insert("0.0", f"Parent Folder: {parent_dir}\n")
-            if self.preview_data:
-                self.debug_text.insert("end", f"Example: {self.preview_data[0]['new']}\n")
-
-            self.populate_table()
-
-            season_count = len(set(item['season'] for item in self.preview_data))
-            episode_count = len(self.preview_data)
-
-            self.season_count_label.configure(text=f"Seasons: {season_count}")
-            self.episode_count_label.configure(text=f"Total Episodes: {episode_count}")
-        except Exception as e:
-            self.debug_text.insert("end", f"Error: {e}")
+        self.last_folder = folder_selected
+        if self.scrape_titles.get():
+            parent_dir, self.preview_data = get_scraped_preview_data(folder_selected, self.title_cache)
+        else:
+            parent_dir, self.preview_data = get_preview_data(folder_selected)
+        self.debug_text.delete("0.0", "end")
+        self.debug_text.insert("0.0", f"Parent Folder: {parent_dir}\n")
+        if self.preview_data:
+            self.debug_text.insert("end", f"Example: {self.preview_data[0]['new']}\n")
+        self.populate_table()
+        season_count = len(set(item['season'] for item in self.preview_data))
+        episode_count = len(self.preview_data)
+        self.season_count_label.configure(text=f"Seasons: {season_count}")
+        self.episode_count_label.configure(text=f"Total Episodes: {episode_count}")
 
     def populate_table(self):
         for widget in self.table.winfo_children():

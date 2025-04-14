@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import filedialog
 from os.path import isfile, join, splitext, basename, abspath
 import requests
+import json
 
 
 def get_preview_data(base_path):
@@ -103,6 +104,8 @@ class EpisodeRenamerApp(ctk.CTk):
         self.preview_data = []
         self.scrape_titles = tk.BooleanVar(value=False)
         self.title_cache = {}
+        self.cache_file = "episode_cache.json"
+        self.load_cache()
 
         # Native menu bar (attached to root window)
         self.option_add('*tearOff', False)
@@ -237,6 +240,21 @@ class EpisodeRenamerApp(ctk.CTk):
             self.log_label.pack(padx=20, anchor="w")
             self.log_box.pack(padx=20, pady=(10, 20), fill='x')
 
+    def load_cache(self):
+        try:
+            if os.path.exists(self.cache_file):
+                with open(self.cache_file, "r", encoding="utf-8") as f:
+                    self.title_cache.update(json.load(f))
+        except Exception as e:
+            self.log(f"⚠️ Failed to load cache: {e}")
+
+    def save_cache(self):
+        try:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
+                json.dump(self.title_cache, f, indent=2)
+        except Exception as e:
+            self.log(f"⚠️ Failed to save cache: {e}")
+
     def show_about_dialog(self):
         about_text = (
             "TidyTV\n\n"
@@ -257,4 +275,5 @@ class EpisodeRenamerApp(ctk.CTk):
 
 if __name__ == "__main__":
     app = EpisodeRenamerApp()
+    app.protocol("WM_DELETE_WINDOW", lambda: [app.save_cache(), app.destroy()])
     app.mainloop()

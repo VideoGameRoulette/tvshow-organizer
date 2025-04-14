@@ -3,9 +3,11 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog
 from os.path import isfile, join, splitext, basename, abspath
+import requests
 
 
 def get_preview_data(base_path):
+    """Generate preview data using only filenames without episode titles."""
     parent_dir = basename(abspath(base_path))
     subfolders = [f.path for f in os.scandir(base_path) if f.is_dir()]
     preview_list = []
@@ -18,6 +20,48 @@ def get_preview_data(base_path):
             file_name, file_extension = splitext(video)
             ePadded = f'{eIndex + 1:02d}'
             new_file_name = f'{parent_dir} - S{sPadded}E{ePadded}{file_extension}'
+            preview_list.append({
+                'season': sPadded,
+                'episode': ePadded,
+                'original': video,
+                'new': new_file_name,
+                'folder': folder
+            })
+
+        return parent_dir, preview_list
+
+
+def get_scraped_preview_data(base_path, title_cache):
+    """Generate preview data using TVMaze to include episode titles if available."""
+    parent_dir = basename(abspath(base_path))
+    subfolders = [f.path for f in os.scandir(base_path) if f.is_dir()]
+    preview_list = []
+
+    for sIndex, folder in enumerate(sorted(subfolders)):
+        sPadded = f'{sIndex + 1:02d}'
+        files = [f for f in os.listdir(folder) if isfile(join(folder, f))]
+
+        for eIndex, video in enumerate(sorted(files)):
+            file_name, file_extension = splitext(video)
+            ePadded = f'{eIndex + 1:02d}'
+            title = ""
+            key = f"{parent_dir}_S{sPadded}E{ePadded}"
+
+            if key in title_cache:
+                title = f" - {title_cache[key]}"
+            else:
+                try:
+                    r = requests.get(f"https://api.tvmaze.com/singlesearch/shows?q={parent_dir}&embed=episodes")
+                    data = r.json()
+                    for ep in data['_embedded']['episodes']:
+                        if ep['season'] == int(sPadded) and ep['number'] == int(ePadded):
+                            title_cache[key] = ep['name']
+                            title = f" - {ep['name']}"
+                            break
+                except Exception:
+                    pass
+
+            new_file_name = f'{parent_dir} - S{sPadded}E{ePadded}{title}{file_extension}'
             preview_list.append({
                 'season': sPadded,
                 'episode': ePadded,
@@ -42,6 +86,12 @@ def rename_files(preview_data, log_callback):
 
 
 class EpisodeRenamerApp(ctk.CTk):
+
+    def select_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.load_preview(folder)
+
     def __init__(self):
         super().__init__()
 
@@ -51,6 +101,8 @@ class EpisodeRenamerApp(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.preview_data = []
+        self.scrape_titles = tk.BooleanVar(value=False)
+        self.title_cache = {}
 
         # Native menu bar (attached to root window)
         self.option_add('*tearOff', False)
@@ -62,6 +114,9 @@ class EpisodeRenamerApp(ctk.CTk):
         menu_bar.add_cascade(label="File", menu=file_menu)
 
         settings_menu = tk.Menu(menu_bar)
+        options_menu = tk.Menu(settings_menu)
+        options_menu.add_checkbutton(label="Scrape Episode Titles", variable=self.scrape_titles, command=self.refresh_preview)
+        settings_menu.add_cascade(label="Options", menu=options_menu)
         settings_menu.add_command(label="🌓 Toggle Theme", command=self.toggle_theme)
         settings_menu.add_command(label="📋 Toggle Logs", command=self.toggle_logs)
         menu_bar.add_cascade(label="Settings", menu=settings_menu)
@@ -104,13 +159,22 @@ class EpisodeRenamerApp(ctk.CTk):
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
-    def select_folder(self):
-        folder_selected = filedialog.askdirectory()
+    def refresh_preview(self):
+        if not hasattr(self, 'last_folder') or not self.last_folder:
+            return
+        self.load_preview(self.last_folder)
+
+    def load_preview(self, folder_selected):
         if not folder_selected:
+            return
             return
 
         try:
-            parent_dir, self.preview_data = get_preview_data(folder_selected)
+            self.last_folder = folder_selected
+            if self.scrape_titles.get():
+                parent_dir, self.preview_data = get_scraped_preview_data(folder_selected, self.title_cache)
+            else:
+                parent_dir, self.preview_data = get_preview_data(folder_selected)
 
             self.debug_text.delete("0.0", "end")
             self.debug_text.insert("0.0", f"Parent Folder: {parent_dir}\n")
